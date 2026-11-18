@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GLB Model Viewer</title>
+</head>
+<body>
+  <header>
+    <h1>GLB Viewer</h1>
+    <div class="group" id="modes">
+      <button class="tab active" data-mode="textured">Textured</button>
+      <button class="tab" data-mode="wireframe">Wireframe</button>
+      <button class="tab" data-mode="clay">Clay</button>
+      <button class="tab" data-mode="normals">Normals</button>
+    </div>
+    <div class="group" id="toggles">
+      <button class="tab active" data-toggle="grid">Grid</button>
+      <button class="tab active" data-toggle="ground">Ground</button>
+      <button class="tab" data-toggle="perf">Performance</button>
+    </div>
+    <button class="upload-btn" id="uploadBtn">Upload .glb</button>
+    <input type="file" id="fileInput" accept=".glb,model/gltf-binary" hidden />
+  </header>
+
+  <div id="viewer">
+    <div id="drop">
+      <div class="drop-icon">⬆</div>
+      <div>Click "Upload .glb" or drag a file here</div>
+    </div>
+    <div id="loading">Loading…</div>
+    <div id="perf"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

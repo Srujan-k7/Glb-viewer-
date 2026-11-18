@@ -359,7 +359,8 @@ new ResizeObserver(() => {
   renderer.setSize(w, h);
 }).observe(container);
 
-// ---------- Performance panel ----------
+// ---------- Performance panel ----
+// ------
 let frames = 0;
 let lastTime = performance.now();
 let fps = 0;

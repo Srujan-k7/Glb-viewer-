@@ -1,7 +1,8 @@
 # CLAUDE.md — GLB Model Viewer
 
-Browser app for uploading `.glb` 3D models and inspecting them with switchable view modes
-(Textured, Wireframe, Clay, Normals) and toggles (Grid, Ground, Performance stats).
+Portfolio viewer for `.glb` 3D models (audience: interviewers). Switchable view modes
+(Textured, Wireframe, Clay, Normals), lighting presets + light controls, backgrounds,
+turntable, performance stats, and a demo-reel video player.
 
 - **Stack:** Vite 8 (vanilla JS, no framework) + three.js r187. `three` is the only runtime dependency.
 - **Status:** Phase 1 (local viewer) built. Phase 2 (shared cloud storage) planned — see Roadmap.
@@ -20,16 +21,19 @@ Browser app for uploading `.glb` 3D models and inspecting them with switchable v
 ## Structure
 
 ```
-index.html      header (mode tabs, toggles, upload) + #viewer container
-src/main.js     scene, loaders, view modes, UI wiring, render loop
-src/style.css   layout and tab styles
+index.html       full-screen #viewer, floating top bar, side panel (#panel), reel <dialog>
+src/main.js      scene, loaders, view modes, lighting/background/turntable wiring, render loop
+src/lighting.js  PRESETS, lightDirection(), createEnvironmentCache() (PMREM env per preset)
+src/reel.js      demo reel: validation + loadReel(url, name)
+src/style.css    design tokens on :root (tungsten accent --key), layout, panel, dialog
 ```
 
 ## Rules
 
 1. **Git lives in this folder only.** The parent `~/Documents/Projects` is a separate repo
    with unrelated projects — never commit from there.
-2. **One loading entry point:** every model goes through `loadModel(url, fileSize)`.
+2. **One loading entry point:** every model goes through `loadModel(url, fileSize, name)`,
+   every reel through `loadReel(url, name)`.
    `loadFile(file)` only validates and passes an object URL. Phase 2 must reuse
    `loadModel` with a remote URL — don't add a second loading path.
 3. **Always dispose.** Any new GPU resource (geometry, material, texture, skeleton,
@@ -63,6 +67,19 @@ src/style.css   layout and tab styles
 - **Perf panel:** refreshes every 0.5 s while visible. Model triangle/vertex counts
   include instancing.
 - **Animations:** first clip auto-plays; the mixer is stopped and uncached on model change.
+- **Lighting:** presets (Studio / Sunset / Night / Neutral) set env map, key light, hemisphere
+  fill, exposure and backdrop colours, and sync the panel. Any manual change clears the preset
+  highlight. Env textures are generated once per preset and cached for the app's lifetime.
+- **Light dial:** top-down view; angle = azimuth, distance from centre = elevation (centre =
+  overhead, min 5°). Arrow keys adjust it. Key light distance = `sceneScale * 5`.
+- **Backgrounds:** Gradient = transparent canvas (`alpha: true`) over the CSS gradient on
+  `#viewer` (`--bg-top/--bg-bottom`); Solid = `scene.background` colour; Environment =
+  env map with `backgroundBlurriness`. Ground is a `ShadowMaterial` shadow catcher.
+- **Turntable:** `controls.autoRotate`, updated with `controls.update(dt)`.
+- **Panel:** open by default on desktop (view offset keeps the model centred beside it),
+  bottom sheet closed by default at ≤ 760 px.
+- **Demo reel:** MP4/WebM/MOV up to 500 MB in a `<dialog>`; a video dropped on the viewer
+  becomes the reel. Previous blob URLs are revoked on replace.
 
 ## Testing checklist
 
@@ -75,6 +92,10 @@ src/style.css   layout and tab styles
 - [ ] GPU geometry/texture counts in the perf panel return to the same values after loading another model
 - [ ] Two quick loads → only the second shows
 - [ ] Animated model plays; switching models stops it
+- [ ] Each lighting preset changes light, reflections and backdrop; dial moves the shadow
+- [ ] Gradient / Solid / Environment backgrounds work, also with the wireframe overlay
+- [ ] Reel: video plays, replacing revokes the old one, non-video shows an inline error
+- [ ] Panel toggles; phone width shows a bottom sheet
 - [ ] Resize doesn't stretch; `npm run build && npm run preview` works
 
 ## Known notes
@@ -85,13 +106,16 @@ src/style.css   layout and tab styles
 
 ## Roadmap
 
-**Phase 2 — shared models (planned backend: Supabase)**
+**Phase 2 — admin-managed content (planned backend: Supabase)**
+- Public site (`abc.com`) is view-only: no upload/delete UI. Admin page (`abc.com/admin`,
+  separate Vite entry `admin.html`) handles upload/delete after sign-in. Public sign-ups off;
+  RLS allows insert/delete only for the admin account. Reel moves to admin upload too.
 - Storage bucket `models` (public read, ≤ 50 MB per file); table `models`
   (`id`, `name`, `path`, `size_bytes`, `thumbnail_path`, `owner_id`, `created_at`).
 - Upload: validate → upload to storage → insert row → `loadModel(publicUrl, size)`.
 - Gallery page with thumbnails (capture the canvas right after a render).
 - Share links: `?model=<id>`.
-- Sign-in required to upload, anyone can view, owners can delete.
+- Anyone can view; only the admin can upload or delete (enforced by RLS, not the URL).
 - Row Level Security on table and bucket; enforce size/type limits server-side.
 
-**Later:** HDRI switcher, bounding-box view, UV checker, screenshot button, animation clip picker.
+**Later:** HDRI file switcher, bounding-box view, UV checker, screenshot button, animation clip picker.

@@ -5,24 +5,26 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { PRESETS, lightDirection, createEnvironmentCache } from './lighting.js';
+import { isVideoFile, loadReelFile, openReel } from './reel.js';
 
 const MAX_FILE_MB = 200;
+const MOBILE_QUERY = window.matchMedia('(max-width: 760px)');
 
 // ---------- Renderer / scene / camera ----------
 const container = document.getElementById('viewer');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// alpha: the "Gradient" background is the CSS backdrop of #viewer showing through the canvas.
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setClearColor(0x000000, 0);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1e1e24);
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const getEnvironment = createEnvironmentCache(renderer);
 
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.01, 1000);
 camera.position.set(3, 2, 3);
@@ -31,23 +33,24 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
 // ---------- Lights ----------
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.6));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-dirLight.position.set(5, 10, 5);
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.4);
+scene.add(hemiLight);
+const dirLight = new THREE.DirectionalLight(0xffffff, 2);
 dirLight.castShadow = true;
 dirLight.shadow.mapSize.set(2048, 2048);
 dirLight.shadow.bias = -0.0005; // normalBias is scaled per model in frameModel()
 scene.add(dirLight);
 
 // ---------- Grid & ground ----------
-const grid = new THREE.GridHelper(10, 20, 0x888888, 0x44444c);
+const grid = new THREE.GridHelper(10, 20, 0xffffff, 0xffffff);
+grid.material.transparent = true;
+grid.material.opacity = 0.12;
+grid.material.depthWrite = false;
 grid.position.y = 0.001;
 scene.add(grid);
 
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(1, 1),
-  new THREE.MeshStandardMaterial({ color: 0x2a2a32, roughness: 1 })
-);
+// Shadow catcher: shows only the shadow, so it sits naturally on any background.
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.35 }));
 ground.rotation.x = -Math.PI / 2;
 ground.scale.set(10, 10, 1);
 ground.receiveShadow = true;
@@ -69,11 +72,24 @@ let mixer = null;
 let surfaceMode = 'textured'; // 'textured' | 'clay' | 'normals' | null (wireframe only)
 let showWire = false; // wireframe on its own, or as an overlay on the surface mode
 let loadId = 0;
+let sceneScale = 1; // largest model dimension; lights, grid and shadows scale with it
 const originalMaterials = new Map(); // mesh -> original material (or array)
 const overrideCache = new Map(); // original material -> { wireframe, clay, normals }
 const modelStats = { meshes: 0, vertices: 0, triangles: 0, materials: 0, fileSize: 0 };
 const loadingEl = document.getElementById('loading');
 const dropEl = document.getElementById('drop');
+const modelNameEl = document.getElementById('modelName');
+
+const look = {
+  preset: 'studio',
+  az: 45,
+  el: 55,
+  background: 'gradient', // 'gradient' | 'solid' | 'environment'
+  bgTop: '#3b404b',
+  bgBottom: '#14161a',
+  bgSolid: '#22252c',
+  bgBlur: 0.5
+};
 
 // ---------- Loading ----------
 /** Validate a local File, then hand it to loadModel(). */
@@ -88,11 +104,11 @@ function loadFile(file) {
     return;
   }
   const url = URL.createObjectURL(file);
-  loadModel(url, file.size).finally(() => URL.revokeObjectURL(url));
+  loadModel(url, file.size, file.name).finally(() => URL.revokeObjectURL(url));
 }
 
 /** Single entry point for loading any model URL (local blob now, cloud URL in Phase 2). */
-async function loadModel(url, fileSize = 0) {
+async function loadModel(url, fileSize = 0, name = '') {
   const id = ++loadId;
   loadingEl.style.display = 'block';
   try {
@@ -102,6 +118,7 @@ async function loadModel(url, fileSize = 0) {
       return;
     }
     setModel(gltf, fileSize);
+    modelNameEl.textContent = name.replace(/\.glb$/i, '');
   } catch (err) {
     if (id !== loadId) return;
     console.error(err);
@@ -190,6 +207,7 @@ function frameModel(obj) {
   obj.position.y -= box.min.y;
 
   const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  sceneScale = maxDim;
   const dist = (maxDim / (2 * Math.tan((camera.fov * Math.PI) / 360))) * 1.5;
   camera.near = maxDim / 100;
   camera.far = maxDim * 100;
@@ -203,7 +221,6 @@ function frameModel(obj) {
   grid.position.y = maxDim * 0.002; // scale offset with the model to avoid z-fighting
   ground.scale.set(g, g, 1);
 
-  dirLight.position.set(maxDim * 2, maxDim * 4, maxDim * 2);
   dirLight.shadow.normalBias = maxDim * 0.003; // ~1.5 shadow-map texels
   const sc = dirLight.shadow.camera;
   sc.left = -g / 2;
@@ -213,6 +230,12 @@ function frameModel(obj) {
   sc.near = 0.01;
   sc.far = maxDim * 12;
   sc.updateProjectionMatrix();
+  placeKeyLight();
+}
+
+/** Positions the key light from the dial's direction/height, at a distance that scales with the model. */
+function placeKeyLight() {
+  lightDirection(look.az, look.el, dirLight.position).multiplyScalar(sceneScale * 5);
 }
 
 // ---------- View modes ----------
@@ -284,6 +307,202 @@ wireOverlay.onBeforeCompile = (shader) => {
 };
 wireOverlay.customProgramCacheKey = () => 'wire-overlay';
 
+// ---------- Lighting & background ----------
+const $ = (id) => document.getElementById(id);
+const ui = {
+  keyColor: $('keyColor'),
+  keyIntensity: $('keyIntensity'),
+  shadows: $('shadows'),
+  exposure: $('exposure'),
+  envIntensity: $('envIntensity'),
+  bgTop: $('bgTop'),
+  bgBottom: $('bgBottom'),
+  bgSolid: $('bgSolid'),
+  bgBlur: $('bgBlur'),
+  autoRotate: $('autoRotate'),
+  rotateSpeed: $('rotateSpeed')
+};
+const outputs = {
+  keyIntensity: [$('keyIntensityOut'), 1],
+  exposure: [$('exposureOut'), 2],
+  envIntensity: [$('envIntensityOut'), 2],
+  bgBlur: [$('bgBlurOut'), 2],
+  rotateSpeed: [$('rotateSpeedOut'), 1]
+};
+function showValue(name) {
+  const [el, digits] = outputs[name];
+  el.value = Number(ui[name].value).toFixed(digits);
+}
+
+function applyBackground() {
+  const mode = look.background;
+  if (mode === 'gradient') {
+    scene.background = null;
+    container.style.setProperty('--bg-top', look.bgTop);
+    container.style.setProperty('--bg-bottom', look.bgBottom);
+  } else if (mode === 'solid') {
+    scene.background = new THREE.Color(look.bgSolid);
+  } else {
+    scene.background = scene.environment;
+    scene.backgroundBlurriness = look.bgBlur;
+  }
+  document.querySelectorAll('[data-bg]').forEach((b) => b.classList.toggle('active', b.dataset.bg === mode));
+  document.querySelectorAll('.bg-options').forEach((el) => (el.hidden = el.dataset.for !== mode));
+}
+
+function applyPreset(name) {
+  const p = PRESETS[name];
+  look.preset = name;
+  look.az = p.key.az;
+  look.el = p.key.el;
+  look.bgTop = p.backdrop.top;
+  look.bgBottom = p.backdrop.bottom;
+  look.bgSolid = p.backdrop.solid;
+
+  scene.environment = getEnvironment(name);
+  scene.environmentIntensity = p.envIntensity;
+  renderer.toneMappingExposure = p.exposure;
+  dirLight.color.set(p.key.color);
+  dirLight.intensity = p.key.intensity;
+  hemiLight.color.set(p.fill.sky);
+  hemiLight.groundColor.set(p.fill.ground);
+  hemiLight.intensity = p.fill.intensity;
+  placeKeyLight();
+
+  // Sync the panel to the preset's values.
+  ui.keyColor.value = p.key.color;
+  ui.keyIntensity.value = p.key.intensity;
+  ui.exposure.value = p.exposure;
+  ui.envIntensity.value = p.envIntensity;
+  ui.bgTop.value = look.bgTop;
+  ui.bgBottom.value = look.bgBottom;
+  ui.bgSolid.value = look.bgSolid;
+  ['keyIntensity', 'exposure', 'envIntensity'].forEach(showValue);
+  updateDial();
+  applyBackground();
+  markPreset(name);
+}
+
+/** Highlights the active preset; any manual lighting change clears the highlight. */
+function markPreset(name) {
+  look.preset = name;
+  document.querySelectorAll('.preset').forEach((b) => {
+    const on = b.dataset.preset === name;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on);
+  });
+}
+
+const presetsEl = $('presets');
+Object.entries(PRESETS).forEach(([name, p]) => {
+  const btn = document.createElement('button');
+  btn.className = 'preset';
+  btn.dataset.preset = name;
+  btn.innerHTML = `<span class="preset-swatch"></span><span>${p.label}</span>`;
+  btn.firstElementChild.style.background = `radial-gradient(circle at 35% 30%, ${p.key.color}, ${p.backdrop.top} 55%, ${p.backdrop.bottom})`;
+  btn.addEventListener('click', () => applyPreset(name));
+  presetsEl.append(btn);
+});
+
+ui.keyColor.addEventListener('input', () => {
+  dirLight.color.set(ui.keyColor.value);
+  markPreset(null);
+});
+ui.keyIntensity.addEventListener('input', () => {
+  dirLight.intensity = Number(ui.keyIntensity.value);
+  showValue('keyIntensity');
+  markPreset(null);
+});
+ui.exposure.addEventListener('input', () => {
+  renderer.toneMappingExposure = Number(ui.exposure.value);
+  showValue('exposure');
+  markPreset(null);
+});
+ui.envIntensity.addEventListener('input', () => {
+  scene.environmentIntensity = Number(ui.envIntensity.value);
+  showValue('envIntensity');
+  markPreset(null);
+});
+ui.shadows.addEventListener('change', () => (dirLight.castShadow = ui.shadows.checked));
+
+document.querySelectorAll('[data-bg]').forEach((b) =>
+  b.addEventListener('click', () => {
+    look.background = b.dataset.bg;
+    applyBackground();
+  })
+);
+['bgTop', 'bgBottom', 'bgSolid'].forEach((key) =>
+  ui[key].addEventListener('input', () => {
+    look[key] = ui[key].value;
+    applyBackground();
+  })
+);
+ui.bgBlur.addEventListener('input', () => {
+  look.bgBlur = Number(ui.bgBlur.value);
+  showValue('bgBlur');
+  applyBackground();
+});
+
+// ---------- Light dial ----------
+// Top-down view of the scene: angle = direction around the model, distance from centre = height
+// (centre = straight overhead, edge = on the horizon).
+const MIN_EL = 5;
+const dial = $('dial');
+const dialKnob = $('dialKnob');
+
+function updateDial() {
+  const r = ((90 - look.el) / (90 - MIN_EL)) * 0.42; // fraction of dial size
+  const a = THREE.MathUtils.degToRad(look.az);
+  dialKnob.style.transform = `translate(${Math.cos(a) * r * dial.offsetWidth}px, ${Math.sin(a) * r * dial.offsetWidth}px)`;
+  const az = Math.round(look.az);
+  const el = Math.round(look.el);
+  $('azOut').textContent = `${az}°`;
+  $('elOut').textContent = `${el}°`;
+  dial.setAttribute('aria-valuetext', `Direction ${az} degrees, height ${el} degrees`);
+}
+
+function setLightAngles(az, el) {
+  look.az = ((az % 360) + 360) % 360;
+  look.el = THREE.MathUtils.clamp(el, MIN_EL, 90);
+  placeKeyLight();
+  updateDial();
+  markPreset(null);
+}
+
+function dialFromPointer(e) {
+  const rect = dial.getBoundingClientRect();
+  const x = e.clientX - (rect.left + rect.width / 2);
+  const y = e.clientY - (rect.top + rect.height / 2);
+  const r = Math.min(Math.hypot(x, y) / (rect.width * 0.42), 1);
+  setLightAngles(THREE.MathUtils.radToDeg(Math.atan2(y, x)), 90 - r * (90 - MIN_EL));
+}
+dial.addEventListener('pointerdown', (e) => {
+  dial.setPointerCapture(e.pointerId);
+  dialFromPointer(e);
+});
+dial.addEventListener('pointermove', (e) => {
+  if (dial.hasPointerCapture(e.pointerId)) dialFromPointer(e);
+});
+dial.addEventListener('keydown', (e) => {
+  const step = e.shiftKey ? 15 : 5;
+  const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
+  const m = moves[e.key];
+  if (!m) return;
+  e.preventDefault();
+  setLightAngles(look.az + m[0], look.el + m[1]);
+});
+
+// ---------- Turntable ----------
+ui.autoRotate.addEventListener('change', () => {
+  controls.autoRotate = ui.autoRotate.checked;
+  $('rotateSpeedRow').hidden = !ui.autoRotate.checked;
+});
+ui.rotateSpeed.addEventListener('input', () => {
+  controls.autoRotateSpeed = Number(ui.rotateSpeed.value);
+  showValue('rotateSpeed');
+});
+controls.autoRotateSpeed = Number(ui.rotateSpeed.value);
+
 // ---------- UI wiring ----------
 // Textured / Clay / Normals pick the surface (only one at a time). Wireframe toggles on its
 // own and overlays the surface. At least one of the two is always on.
@@ -302,33 +521,50 @@ modeButtons.forEach((btn) => {
     }
     modeButtons.forEach((b) => {
       const m = b.dataset.mode;
-      b.classList.toggle('active', m === 'wireframe' ? showWire : m === surfaceMode);
+      const on = m === 'wireframe' ? showWire : m === surfaceMode;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on);
     });
     applyViewMode();
   });
 });
+modeButtons.forEach((b) => b.setAttribute('aria-pressed', b.classList.contains('active')));
 
-const perfEl = document.getElementById('perf');
-document.querySelectorAll('[data-toggle]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const on = btn.classList.toggle('active');
-    if (btn.dataset.toggle === 'grid') grid.visible = on;
-    if (btn.dataset.toggle === 'ground') ground.visible = on;
-    if (btn.dataset.toggle === 'perf') {
+const perfEl = $('perf');
+document.querySelectorAll('[data-toggle]').forEach((input) => {
+  input.addEventListener('change', () => {
+    const on = input.checked;
+    if (input.dataset.toggle === 'grid') grid.visible = on;
+    if (input.dataset.toggle === 'ground') ground.visible = on;
+    if (input.dataset.toggle === 'perf') {
       perfEl.classList.toggle('show', on);
       if (on) updatePerf();
     }
   });
 });
 
-const fileInput = document.getElementById('fileInput');
-document.getElementById('uploadBtn').addEventListener('click', () => fileInput.click());
+// Side panel: open by default on desktop, closed on phones.
+const panel = $('panel');
+const panelBtn = $('panelBtn');
+function setPanel(open) {
+  panel.classList.toggle('closed', !open);
+  panel.inert = !open;
+  panelBtn.setAttribute('aria-expanded', open);
+  updateViewOffset();
+}
+panelBtn.addEventListener('click', () => setPanel(panel.classList.contains('closed')));
+
+$('reelBtn').addEventListener('click', openReel);
+
+const fileInput = $('fileInput');
+$('uploadBtn').addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', (e) => {
   loadFile(e.target.files[0]);
   fileInput.value = ''; // allow re-uploading the same file
 });
 
 // Drag & drop — depth counter prevents flicker when crossing child elements.
+// A dropped video becomes the demo reel; anything else is treated as a model.
 let dragDepth = 0;
 container.addEventListener('dragenter', (e) => {
   e.preventDefault();
@@ -344,23 +580,33 @@ container.addEventListener('drop', (e) => {
   e.preventDefault();
   dragDepth = 0;
   container.classList.remove('dragging');
-  loadFile(e.dataTransfer.files[0]);
+  const file = e.dataTransfer.files[0];
+  if (isVideoFile(file)) loadReelFile(file);
+  else loadFile(file);
 });
 // Stop the browser opening files dropped outside the viewer.
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
+
+/** On desktop, shift the rendered view left so the model is centred in the area beside the open panel. */
+function updateViewOffset() {
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  const shift = !MOBILE_QUERY.matches && !panel.classList.contains('closed') ? (panel.offsetWidth + 14) / 2 : 0;
+  if (shift) camera.setViewOffset(w, h, shift, 0, w, h);
+  else camera.clearViewOffset();
+}
 
 new ResizeObserver(() => {
   const w = container.clientWidth;
   const h = container.clientHeight;
   if (!w || !h) return;
   camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  updateViewOffset(); // also updates the projection matrix
   renderer.setSize(w, h);
 }).observe(container);
 
-// ---------- Performance panel ----
-// ------
+// ---------- Performance panel ----------
 let frames = 0;
 let lastTime = performance.now();
 let fps = 0;
@@ -374,7 +620,7 @@ function updatePerf() {
     ['Rendered triangles', fmt(info.render.triangles)],
     ['Geometries (GPU)', info.memory.geometries],
     ['Textures (GPU)', info.memory.textures],
-    ['— Model —', ''],
+    null,
     ['Meshes', fmt(modelStats.meshes)],
     ['Vertices', fmt(modelStats.vertices)],
     ['Triangles', fmt(modelStats.triangles)],
@@ -382,7 +628,7 @@ function updatePerf() {
     ['File size', modelStats.fileSize ? (modelStats.fileSize / 1048576).toFixed(2) + ' MB' : '-']
   ];
   perfEl.innerHTML = rows
-    .map(([k, v]) => `<div class="row"><span>${k}</span><span class="val">${v}</span></div>`)
+    .map((r) => (r ? `<div class="row"><span>${r[0]}</span><span class="val">${r[1]}</span></div>` : '<div class="sep"></div>'))
     .join('');
 }
 
@@ -416,12 +662,18 @@ function render() {
   ground.visible = groundVisible;
 }
 
+// ---------- Start ----------
+applyPreset('studio');
+showValue('bgBlur');
+showValue('rotateSpeed');
+setPanel(!MOBILE_QUERY.matches);
+
 const timer = new THREE.Timer();
 renderer.setAnimationLoop((time) => {
   timer.update(time);
   const dt = timer.getDelta();
   if (mixer) mixer.update(dt);
-  controls.update();
+  controls.update(dt); // dt keeps turntable speed independent of frame rate
   render();
 
   frames++;

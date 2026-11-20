@@ -1,0 +1,11 @@
+// Cloudflare deploy config. The site is static files only (no Worker code):
+// `npm run build` writes dist/, and `wrangler deploy` uploads it.
+{
+  "name": "glbviewer",
+  "compatibility_date": "2026-11-18",
+  "assets": {
+    "directory": "./dist",
+    // Clean URLs: /admin serves admin.html, /viewer serves viewer.html.
+    "html_handling": "auto-trailing-slash"
+  }
+}

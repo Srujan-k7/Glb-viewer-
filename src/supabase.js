@@ -12,6 +12,7 @@ export const supabase = isConfigured ? createClient(url, key) : null;
 export const MAX_UPLOAD_MB = 50;
 export const MODELS_BUCKET = 'models';
 export const REELS_BUCKET = 'reels';
+export const THUMBS_BUCKET = 'thumbnails';
 
 export function publicUrl(bucket, path) {
   return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;

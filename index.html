@@ -7,147 +7,36 @@
   <title>GLB Viewer</title>
 </head>
 <body>
-  <div id="viewer">
-    <div id="drop">
-      <svg class="drop-icon" viewBox="0 0 48 48" aria-hidden="true">
-        <path d="M24 5 41 14.5v19L24 43 7 33.5v-19L24 5Z M7 14.5 24 24l17-9.5 M24 24v19" />
-      </svg>
-      <p class="drop-title">Open a .glb model</p>
-      <p class="drop-hint">Drag a file here, or use Upload .glb. Drop a video to set the demo reel.</p>
-    </div>
-    <div id="loading" role="status">Loading model…</div>
-    <div id="perf"></div>
-  </div>
-
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-name">GLB Viewer</span>
-      <span class="model-name" id="modelName"></span>
-    </div>
-
-    <div class="segmented" id="modes" role="group" aria-label="View mode">
-      <button class="seg active" data-mode="textured">Textured</button>
-      <button class="seg" data-mode="wireframe">Wireframe</button>
-      <button class="seg" data-mode="clay">Clay</button>
-      <button class="seg" data-mode="normals">Normals</button>
-    </div>
-
-    <div class="actions">
-      <button class="btn" id="reelBtn">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4.5v11l9-5.5-9-5.5Z" /></svg>
-        Reel
-      </button>
-      <button class="btn" id="panelBtn" aria-expanded="true" aria-controls="panel">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.2" /><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M4.3 15.7l1.8-1.8M13.9 6.1l1.8-1.8" /></svg>
-        Lighting
-      </button>
-      <button class="btn primary" id="uploadBtn">Upload .glb</button>
-      <input type="file" id="fileInput" accept=".glb,model/gltf-binary" hidden />
-    </div>
+  <header class="site-head">
+    <span class="brand-name">GLB Viewer</span>
+    <button class="btn" id="reelBtn" hidden>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4.5v11l9-5.5-9-5.5Z" /></svg>
+      Demo reel
+    </button>
   </header>
 
-  <aside class="panel" id="panel" aria-label="Lighting and scene">
-    <section>
-      <h2>Lighting preset</h2>
-      <div class="presets" id="presets"></div>
-    </section>
-
-    <section>
-      <h2>Key light</h2>
-      <div class="dial-row">
-        <div class="dial" id="dial" tabindex="0" role="slider"
-             aria-label="Key light direction. Arrow keys: left and right rotate, up and down raise or lower.">
-          <div class="dial-ring"></div>
-          <div class="dial-ring inner"></div>
-          <div class="dial-center"></div>
-          <div class="dial-knob" id="dialKnob"></div>
-        </div>
-        <dl class="dial-readout">
-          <div><dt>Direction</dt><dd id="azOut">45°</dd></div>
-          <div><dt>Height</dt><dd id="elOut">55°</dd></div>
-          <div class="color-field">
-            <dt><label for="keyColor">Colour</label></dt>
-            <dd><input type="color" id="keyColor" value="#ffffff" /></dd>
-          </div>
-        </dl>
-      </div>
-      <label class="slider">
-        <span>Brightness</span><output id="keyIntensityOut">2.0</output>
-        <input type="range" id="keyIntensity" min="0" max="6" step="0.1" value="2" />
-      </label>
-      <label class="switch">
-        <span>Shadows</span>
-        <input type="checkbox" id="shadows" checked />
-      </label>
-    </section>
-
-    <section>
-      <h2>Exposure and environment</h2>
-      <label class="slider">
-        <span>Exposure</span><output id="exposureOut">1.00</output>
-        <input type="range" id="exposure" min="0.2" max="2.5" step="0.05" value="1" />
-      </label>
-      <label class="slider">
-        <span>Reflections</span><output id="envIntensityOut">1.00</output>
-        <input type="range" id="envIntensity" min="0" max="2" step="0.05" value="1" />
-      </label>
-    </section>
-
-    <section>
-      <h2>Background</h2>
-      <div class="segmented small" id="bgModes" role="group" aria-label="Background">
-        <button class="seg active" data-bg="gradient">Gradient</button>
-        <button class="seg" data-bg="solid">Solid</button>
-        <button class="seg" data-bg="environment">Environment</button>
-      </div>
-      <div class="bg-options" data-for="gradient">
-        <label class="color-row"><span>Top</span><input type="color" id="bgTop" /></label>
-        <label class="color-row"><span>Bottom</span><input type="color" id="bgBottom" /></label>
-      </div>
-      <div class="bg-options" data-for="solid" hidden>
-        <label class="color-row"><span>Colour</span><input type="color" id="bgSolid" /></label>
-      </div>
-      <div class="bg-options" data-for="environment" hidden>
-        <label class="slider">
-          <span>Blur</span><output id="bgBlurOut">0.50</output>
-          <input type="range" id="bgBlur" min="0" max="1" step="0.05" value="0.5" />
-        </label>
-      </div>
-    </section>
-
-    <section>
-      <h2>Display</h2>
-      <label class="switch"><span>Turntable</span><input type="checkbox" id="autoRotate" /></label>
-      <label class="slider" id="rotateSpeedRow" hidden>
-        <span>Turntable speed</span><output id="rotateSpeedOut">2.0</output>
-        <input type="range" id="rotateSpeed" min="0.2" max="10" step="0.1" value="2" />
-      </label>
-      <label class="switch"><span>Grid</span><input type="checkbox" data-toggle="grid" checked /></label>
-      <label class="switch"><span>Ground shadow</span><input type="checkbox" data-toggle="ground" checked /></label>
-      <label class="switch"><span>Performance stats</span><input type="checkbox" data-toggle="perf" /></label>
-    </section>
-  </aside>
+  <main>
+    <div class="intro">
+      <h1>3D models</h1>
+      <p class="muted" id="count"></p>
+    </div>
+    <p class="state" id="state" role="status">Loading models…</p>
+    <ul class="grid" id="grid"></ul>
+  </main>
 
   <dialog id="reel" aria-labelledby="reelTitle">
     <div class="reel-head">
       <h2 id="reelTitle">Demo reel</h2>
-      <button class="btn" id="reelReplace" data-reel-pick hidden>Replace video</button>
       <button class="icon-btn" id="reelClose" aria-label="Close reel">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" /></svg>
       </button>
     </div>
     <div class="reel-body">
-      <video id="reelVideo" controls playsinline hidden></video>
-      <div class="reel-empty" id="reelEmpty">
-        <p class="drop-title">No demo reel yet</p>
-        <p class="drop-hint">Add an MP4, WebM or MOV video, up to 500 MB. You can also drop it here.</p>
-        <button class="btn primary" data-reel-pick>Choose video</button>
-      </div>
+      <video id="reelVideo" controls playsinline></video>
       <p class="reel-error" id="reelError" role="alert" hidden></p>
     </div>
-    <input type="file" id="reelInput" accept="video/mp4,video/webm,video/quicktime,.mp4,.m4v,.webm,.mov" hidden />
   </dialog>
 
-  <script type="module" src="/src/main.js"></script>
+  <script type="module" src="/src/gallery.js"></script>
 </body>
 </html>

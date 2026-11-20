@@ -28,7 +28,7 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
-button, input { font: inherit; color: inherit; }
+button, input, select { font: inherit; color: inherit; }
 svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 :focus-visible { outline: 2px solid var(--key); outline-offset: 2px; }
 
@@ -40,19 +40,6 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   background: radial-gradient(120% 90% at 50% 0%, var(--bg-top), var(--bg-bottom));
 }
 #viewer canvas { display: block; }
-#viewer.dragging::after {
-  content: 'Drop to open';
-  position: absolute;
-  inset: 16px;
-  border: 1.5px dashed var(--key);
-  border-radius: 18px;
-  display: grid;
-  place-items: center;
-  font-size: 18px;
-  background: rgba(245, 180, 81, 0.06);
-  pointer-events: none;
-}
-
 #drop {
   position: absolute;
   inset: 0;
@@ -118,7 +105,19 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   z-index: 2;
 }
 .topbar > * { pointer-events: auto; }
-.brand { display: flex; flex-direction: column; min-width: 0; justify-self: start; }
+.brand-row { display: flex; align-items: center; gap: 8px; min-width: 0; justify-self: start; }
+.brand { display: flex; flex-direction: column; min-width: 0; }
+.icon-btn.back {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  color: var(--text);
+}
 .brand-name { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
 .model-name { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 32ch; }
 .model-name:empty { display: none; }
@@ -304,9 +303,6 @@ dialog#reel::backdrop { background: rgba(6, 7, 9, 0.72); backdrop-filter: blur(6
 .reel-head h2 { font-size: 15px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reel-body { background: #000; }
 .reel-body video { display: block; width: 100%; max-height: calc(100vh - 120px); background: #000; }
-.reel-empty { aspect-ratio: 16 / 9; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; background: var(--bg); }
-.reel-empty[hidden], .reel-body video[hidden] { display: none; }
-.reel-empty .btn { margin-top: 8px; }
 .reel-error { padding: 10px 18px; background: #3a1d1d; color: #ffc9c0; }
 
 /* ---------- Small screens: panel becomes a bottom sheet ---------- */

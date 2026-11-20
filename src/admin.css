@@ -116,6 +116,15 @@ input[type='email'], input[type='password'], input[type='text'] {
   border-bottom: 1px solid var(--line);
 }
 .list .info { flex: 1; min-width: 0; }
+.list .thumb {
+  flex: none;
+  width: 72px;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, #3b404b, #14161a);
+}
+.list .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .list .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list .meta { color: var(--muted); font-size: 12px; }
 .list .empty { color: var(--muted); justify-content: center; }

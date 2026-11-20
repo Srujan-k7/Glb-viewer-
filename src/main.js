@@ -6,9 +6,9 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { PRESETS, lightDirection, createEnvironmentCache } from './lighting.js';
-import { isVideoFile, loadReelFile, openReel } from './reel.js';
+import { loadReel, openReel } from './reel.js';
+import { supabase, isConfigured, publicUrl, MODELS_BUCKET, REELS_BUCKET } from './supabase.js';
 
-const MAX_FILE_MB = 200;
 const MOBILE_QUERY = window.matchMedia('(max-width: 760px)');
 
 // ---------- Renderer / scene / camera ----------
@@ -92,22 +92,14 @@ const look = {
 };
 
 // ---------- Loading ----------
-/** Validate a local File, then hand it to loadModel(). */
-function loadFile(file) {
-  if (!file) return;
-  if (!file.name.toLowerCase().endsWith('.glb')) {
-    alert('Please choose a .glb file');
-    return;
-  }
-  if (file.size > MAX_FILE_MB * 1048576) {
-    alert(`File is larger than ${MAX_FILE_MB} MB`);
-    return;
-  }
-  const url = URL.createObjectURL(file);
-  loadModel(url, file.size, file.name).finally(() => URL.revokeObjectURL(url));
+/** Full-screen message, shown only while no model is on screen. */
+function showEmpty(title, hint = '') {
+  document.getElementById('dropTitle').textContent = title;
+  document.getElementById('dropHint').textContent = hint;
+  dropEl.classList.remove('hidden');
 }
 
-/** Single entry point for loading any model URL (local blob now, cloud URL in Phase 2). */
+/** Single entry point for loading any model URL. Resolves true when the model is shown. */
 async function loadModel(url, fileSize = 0, name = '') {
   const id = ++loadId;
   loadingEl.style.display = 'block';
@@ -115,14 +107,16 @@ async function loadModel(url, fileSize = 0, name = '') {
     const gltf = await loader.loadAsync(url);
     if (id !== loadId) {
       disposeObject(gltf.scene); // a newer load superseded this one
-      return;
+      return false;
     }
     setModel(gltf, fileSize);
     modelNameEl.textContent = name.replace(/\.glb$/i, '');
+    return true;
   } catch (err) {
-    if (id !== loadId) return;
+    if (id !== loadId) return false;
     console.error(err);
-    alert('Could not load this model. Check the console for details.');
+    showEmpty('This model couldn’t be loaded', 'Refresh the page, or go back to all models.');
+    return false;
   } finally {
     if (id === loadId) loadingEl.style.display = 'none';
   }
@@ -556,35 +550,7 @@ panelBtn.addEventListener('click', () => setPanel(panel.classList.contains('clos
 
 $('reelBtn').addEventListener('click', openReel);
 
-const fileInput = $('fileInput');
-$('uploadBtn').addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', (e) => {
-  loadFile(e.target.files[0]);
-  fileInput.value = ''; // allow re-uploading the same file
-});
-
-// Drag & drop — depth counter prevents flicker when crossing child elements.
-// A dropped video becomes the demo reel; anything else is treated as a model.
-let dragDepth = 0;
-container.addEventListener('dragenter', (e) => {
-  e.preventDefault();
-  dragDepth++;
-  container.classList.add('dragging');
-});
-container.addEventListener('dragleave', () => {
-  dragDepth = Math.max(0, dragDepth - 1);
-  if (dragDepth === 0) container.classList.remove('dragging');
-});
-container.addEventListener('dragover', (e) => e.preventDefault());
-container.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dragDepth = 0;
-  container.classList.remove('dragging');
-  const file = e.dataTransfer.files[0];
-  if (isVideoFile(file)) loadReelFile(file);
-  else loadFile(file);
-});
-// Stop the browser opening files dropped outside the viewer.
+// The public site is view-only: stop the browser opening files dropped on the page.
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
 
@@ -662,11 +628,49 @@ function render() {
   ground.visible = groundVisible;
 }
 
+// ---------- Content from Supabase ----------
+/** The viewer shows the model named in ?model=<id>; the list lives on the home page. */
+async function loadContent() {
+  if (!isConfigured) {
+    showEmpty('Viewer not configured', 'Supabase URL and key are missing.');
+    return;
+  }
+  const id = new URLSearchParams(location.search).get('model');
+  if (!id) {
+    location.replace('/');
+    return;
+  }
+
+  loadingEl.style.display = 'block';
+  const [modelRes, reelRes] = await Promise.all([
+    supabase.from('models').select('name, path, size_bytes').eq('id', id).maybeSingle(),
+    supabase.from('reels').select('name, path').order('created_at', { ascending: false }).limit(1),
+  ]);
+  loadingEl.style.display = 'none';
+
+  if (reelRes.error) console.error(reelRes.error);
+  const reel = reelRes.data?.[0];
+  if (reel) {
+    loadReel(publicUrl(REELS_BUCKET, reel.path), reel.name);
+    $('reelBtn').hidden = false;
+  }
+
+  const entry = modelRes.data;
+  if (!entry) {
+    if (modelRes.error) console.error(modelRes.error); // e.g. a malformed id
+    showEmpty('Model not found', 'It may have been removed. Go back to see all models.');
+    return;
+  }
+  document.title = `${entry.name} · GLB Viewer`;
+  loadModel(publicUrl(MODELS_BUCKET, entry.path), entry.size_bytes, entry.name);
+}
+
 // ---------- Start ----------
 applyPreset('studio');
 showValue('bgBlur');
 showValue('rotateSpeed');
 setPanel(!MOBILE_QUERY.matches);
+loadContent();
 
 const timer = new THREE.Timer();
 renderer.setAnimationLoop((time) => {

@@ -4,8 +4,9 @@
 import './admin.css';
 import {
   supabase, isConfigured, publicUrl,
-  MAX_UPLOAD_MB, MODELS_BUCKET, REELS_BUCKET,
+  MAX_UPLOAD_MB, MODELS_BUCKET, REELS_BUCKET, THUMBS_BUCKET,
 } from './supabase.js';
+import { renderThumbnail } from './thumbnail.js';
 
 const $ = (id) => document.getElementById(id);
 const views = ['configView', 'loginView', 'deniedView', 'dashView'];
@@ -86,7 +87,7 @@ async function refreshModels() {
   const list = $('modelList');
   const { data, error } = await supabase
     .from('models')
-    .select('id, name, path, size_bytes, created_at')
+    .select('id, name, path, size_bytes, created_at, thumbnail_path')
     .order('created_at', { ascending: false });
 
   list.replaceChildren();
@@ -105,8 +106,36 @@ async function refreshModels() {
   for (const model of data) list.append(modelRow(model));
 }
 
+/** Removes a storage file, ignoring a missing path. Used for cleanup, so it only logs failures. */
+async function removeQuietly(bucket, path) {
+  if (!path) return;
+  const { error } = await supabase.storage.from(bucket).remove([path]);
+  if (error) console.warn(`Couldn’t remove ${bucket}/${path}`, error);
+}
+
+/** Renders the model at `modelUrl`, uploads the image and returns its storage path. */
+async function uploadThumbnail(modelUrl) {
+  const blob = await renderThumbnail(modelUrl);
+  const path = `${crypto.randomUUID()}.${blob.type === 'image/webp' ? 'webp' : 'png'}`;
+  const up = await supabase.storage
+    .from(THUMBS_BUCKET)
+    .upload(path, blob, { contentType: blob.type, upsert: false });
+  if (up.error) throw up.error;
+  return path;
+}
+
 function modelRow(model) {
   const li = document.createElement('li');
+
+  const thumb = document.createElement('div');
+  thumb.className = 'thumb';
+  if (model.thumbnail_path) {
+    const img = document.createElement('img');
+    img.src = publicUrl(THUMBS_BUCKET, model.thumbnail_path);
+    img.alt = '';
+    img.loading = 'lazy';
+    thumb.append(img);
+  }
 
   const info = document.createElement('div');
   info.className = 'info';
@@ -120,17 +149,22 @@ function modelRow(model) {
 
   const open = document.createElement('a');
   open.className = 'btn';
-  open.href = publicUrl(MODELS_BUCKET, model.path);
+  open.href = `/viewer.html?model=${encodeURIComponent(model.id)}`; // same link to share with interviewers
   open.target = '_blank';
   open.rel = 'noopener';
-  open.textContent = 'File';
+  open.textContent = 'View';
+
+  const remake = document.createElement('button');
+  remake.className = 'btn';
+  remake.textContent = model.thumbnail_path ? 'Redo thumbnail' : 'Make thumbnail';
+  remake.addEventListener('click', () => remakeThumbnail(model, remake));
 
   const del = document.createElement('button');
   del.className = 'btn danger';
   del.textContent = 'Delete';
   del.addEventListener('click', () => deleteModel(model, del));
 
-  li.append(info, open, del);
+  li.append(thumb, info, open, remake, del);
   return li;
 }
 
@@ -152,25 +186,45 @@ $('modelForm').addEventListener('submit', async (e) => {
   const path = `${crypto.randomUUID()}.glb`;
 
   busy(form, true);
-  setStatus(status, `Uploading ${file.name} (${formatSize(file.size)})…`);
+  // Paths of files uploaded so far, so a later failure can clean them up.
+  let modelPath = null;
+  let thumbPath = null;
   try {
+    // Thumbnail first, from the local file. A failed thumbnail doesn't block the upload.
+    setStatus(status, 'Making thumbnail…');
+    const localUrl = URL.createObjectURL(file);
+    try {
+      thumbPath = await uploadThumbnail(localUrl);
+    } catch (err) {
+      console.warn('Thumbnail failed', err);
+    } finally {
+      URL.revokeObjectURL(localUrl);
+    }
+
+    setStatus(status, `Uploading ${file.name} (${formatSize(file.size)})…`);
     const up = await supabase.storage
       .from(MODELS_BUCKET)
       .upload(path, file, { contentType: 'model/gltf-binary', upsert: false });
     if (up.error) throw up.error;
+    modelPath = path;
 
-    const row = await supabase.from('models').insert({ name, path, size_bytes: file.size });
-    if (row.error) {
-      // Don't leave an orphaned file behind if the database rejected the row.
-      await supabase.storage.from(MODELS_BUCKET).remove([path]);
-      throw row.error;
-    }
+    const row = await supabase
+      .from('models')
+      .insert({ name, path, size_bytes: file.size, thumbnail_path: thumbPath });
+    if (row.error) throw row.error;
 
     form.reset();
-    setStatus(status, `Uploaded “${name}”.`, 'ok');
+    setStatus(
+      status,
+      thumbPath ? `Uploaded “${name}”.` : `Uploaded “${name}”, but the thumbnail failed. Try “Make thumbnail”.`,
+      thumbPath ? 'ok' : 'error',
+    );
     refreshModels();
   } catch (err) {
     console.error(err);
+    // Don't leave orphaned files behind if a later step was rejected.
+    await removeQuietly(MODELS_BUCKET, modelPath);
+    await removeQuietly(THUMBS_BUCKET, thumbPath);
     setStatus(status, `Upload failed: ${err.message}`, 'error');
   } finally {
     busy(form, false);
@@ -189,11 +243,38 @@ async function deleteModel(model, button) {
     button.disabled = false;
     return setStatus(status, `Delete failed: ${row.error?.message ?? 'not allowed'}`, 'error');
   }
-  const file = await supabase.storage.from(MODELS_BUCKET).remove([model.path]);
-  if (file.error) console.warn('Row deleted but file remains:', model.path, file.error);
+  await removeQuietly(MODELS_BUCKET, model.path);
+  await removeQuietly(THUMBS_BUCKET, model.thumbnail_path);
 
   setStatus(status, `Deleted “${model.name}”.`, 'ok');
   refreshModels();
+}
+
+/** For models uploaded before thumbnails existed, or to redo one: render from the public file. */
+async function remakeThumbnail(model, button) {
+  const status = $('modelStatus');
+  button.disabled = true;
+  setStatus(status, `Making thumbnail for “${model.name}”…`);
+  let newPath = null;
+  try {
+    newPath = await uploadThumbnail(publicUrl(MODELS_BUCKET, model.path));
+    const row = await supabase
+      .from('models')
+      .update({ thumbnail_path: newPath })
+      .eq('id', model.id)
+      .select('id');
+    if (row.error) throw row.error;
+    if (!row.data.length) throw new Error('not allowed to update this model');
+    newPath = null; // now owned by the row
+    await removeQuietly(THUMBS_BUCKET, model.thumbnail_path);
+    setStatus(status, `Thumbnail ready for “${model.name}”.`, 'ok');
+    refreshModels();
+  } catch (err) {
+    console.error(err);
+    await removeQuietly(THUMBS_BUCKET, newPath);
+    setStatus(status, `Thumbnail failed: ${err.message}`, 'error');
+    button.disabled = false;
+  }
 }
 
 // ---------- Demo reel ----------

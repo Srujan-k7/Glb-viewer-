@@ -38,6 +38,7 @@ create table if not exists public.reels (
 -- GRANT opens the door to the role; the RLS policies below decide which rows it can touch.
 grant select on public.models, public.reels to anon, authenticated;
 grant insert, delete on public.models, public.reels to authenticated;
+grant update (thumbnail_path) on public.models to authenticated;  -- "Make thumbnail" only
 grant execute on function public.is_admin() to anon, authenticated;
 
 -- 3. Row Level Security: everyone reads, only the admin writes ----------------------
@@ -50,6 +51,9 @@ create policy "Admin can add models" on public.models
   for insert to authenticated with check ((select public.is_admin()) and owner_id = auth.uid());
 create policy "Admin can delete models" on public.models
   for delete to authenticated using ((select public.is_admin()));
+create policy "Admin can update models" on public.models
+  for update to authenticated
+  using ((select public.is_admin())) with check ((select public.is_admin()));
 
 create policy "Anyone can view reels" on public.reels
   for select to anon, authenticated using (true);
@@ -79,3 +83,21 @@ create policy "Admin can see files" on storage.objects
 create policy "Admin can delete files" on storage.objects
   for delete to authenticated
   using (bucket_id in ('models', 'reels') and (select public.is_admin()));
+
+-- 5. Thumbnails (made by the admin page on upload) ------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('thumbnails', 'thumbnails', true, 2097152, array['image/webp', 'image/png'])
+on conflict (id) do update
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+create policy "Admin can upload thumbnails" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'thumbnails' and (select public.is_admin()));
+create policy "Admin can see thumbnails" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'thumbnails' and (select public.is_admin()));
+create policy "Admin can delete thumbnails" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'thumbnails' and (select public.is_admin()));

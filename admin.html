@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>GLB Viewer Admin</title>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand-name">GLB Viewer <span class="tag">Admin</span></span>
+    <div class="actions">
+      <a class="btn" href="/">View site</a>
+      <span class="who" id="who"></span>
+      <button class="btn" id="signOut" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Shown when .env.local is missing -->
+    <section class="card narrow" id="configView" hidden>
+      <h1>Supabase isn’t configured</h1>
+      <p class="muted">Copy <code>.env.example</code> to <code>.env.local</code>, fill in your
+        project URL and anon key, then restart <code>npm run dev</code>.</p>
+    </section>
+
+    <!-- Signed out -->
+    <section class="card narrow" id="loginView" hidden>
+      <h1>Sign in</h1>
+      <form id="loginForm">
+        <label class="field"><span>Email</span>
+          <input type="email" id="email" autocomplete="username" required /></label>
+        <label class="field"><span>Password</span>
+          <input type="password" id="password" autocomplete="current-password" required /></label>
+        <button class="btn primary wide" type="submit">Sign in</button>
+        <p class="status" id="loginStatus" role="alert"></p>
+      </form>
+    </section>
+
+    <!-- Signed in, but not the admin account -->
+    <section class="card narrow" id="deniedView" hidden>
+      <h1>No admin access</h1>
+      <p class="muted">This account can’t manage content. Sign out and use the admin account.</p>
+    </section>
+
+    <!-- Signed in as admin -->
+    <div id="dashView" hidden>
+      <section class="card">
+        <div class="card-head">
+          <h1>Models</h1>
+          <span class="muted" id="modelCount"></span>
+        </div>
+        <form class="upload" id="modelForm">
+          <input type="file" id="modelFile" accept=".glb,model/gltf-binary" required />
+          <input type="text" id="modelName" placeholder="Display name (optional)" maxlength="120" />
+          <button class="btn primary" type="submit">Upload model</button>
+        </form>
+        <p class="hint">.glb only, up to 50 MB.</p>
+        <p class="status" id="modelStatus" role="status"></p>
+        <ul class="list" id="modelList"></ul>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h1>Demo reel</h1></div>
+        <div id="reelCurrent"></div>
+        <form class="upload" id="reelForm">
+          <input type="file" id="reelFile" accept="video/mp4,video/webm,video/quicktime,.mp4,.m4v,.webm,.mov" required />
+          <button class="btn primary" type="submit">Upload reel</button>
+        </form>
+        <p class="hint">MP4, WebM or MOV, up to 50 MB. Uploading replaces the current reel.</p>
+        <p class="status" id="reelStatus" role="status"></p>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="/src/admin.js"></script>
+</body>
+</html>

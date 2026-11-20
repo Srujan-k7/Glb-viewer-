@@ -4,8 +4,12 @@ Portfolio viewer for `.glb` 3D models (audience: interviewers). Switchable view 
 (Textured, Wireframe, Clay, Normals), lighting presets + light controls, backgrounds,
 turntable, performance stats, and a demo-reel video player.
 
-- **Stack:** Vite 8 (vanilla JS, no framework) + three.js r187. `three` is the only runtime dependency.
-- **Status:** Phase 1 (local viewer) built. Phase 2 (shared cloud storage) planned — see Roadmap.
+- **Stack:** Vite 8 (vanilla JS, no framework, multi-page: `index.html` + `admin.html`) + three.js r187
+  + `@supabase/supabase-js` (pinned exact).
+- **Status:** Phase 1 (local viewer) built. Phase 2: admin page built (`admin.html`); public site
+  still loads local files only — see Roadmap.
+- **Env:** `.env.local` (git-ignored, template `.env.example`) holds `VITE_SUPABASE_URL` and
+  `VITE_SUPABASE_ANON_KEY`. Never the service_role key — `VITE_*` vars are public.
 - **Test model:** `tree final t.glb` — 1 mesh, 916 triangles, one double-sided textured
   `MeshPhysicalMaterial` (clearcoat + specular), no animation, no alpha cut-outs.
 
@@ -26,6 +30,12 @@ src/main.js      scene, loaders, view modes, lighting/background/turntable wirin
 src/lighting.js  PRESETS, lightDirection(), createEnvironmentCache() (PMREM env per preset)
 src/reel.js      demo reel: validation + loadReel(url, name)
 src/style.css    design tokens on :root (tungsten accent --key), layout, panel, dialog
+admin.html       admin page (noindex): sign-in, models list/upload/delete, reel replace
+src/admin.js     admin logic; checks admin via rpc('is_admin'), upload → insert row (removes file if insert fails)
+src/admin.css    admin styles (same tokens as style.css)
+src/supabase.js  shared client, bucket names, MAX_UPLOAD_MB (50), publicUrl()
+supabase/setup.sql  tables, RLS, buckets, storage policies; admin UUID lives only in is_admin()
+vite.config.js   multi-page build inputs
 ```
 
 ## Rules
